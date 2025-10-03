@@ -1,66 +1,41 @@
 from flask import Flask, render_template, request
 from transformers import pipeline
-import random
+import os
+import csv
+from datetime import datetime
 
+# Initialize Flask
 app = Flask(__name__)
 
-# Load emotion model
-classifier = pipeline("text-classification",
-                      model="j-hartmann/emotion-english-distilroberta-base",
-                      return_all_scores=True)
+# Initialize sentiment-analysis pipeline (small, fast model)
+classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
-# Predefined random thank-you messages
-positive_responses = [
-    "😊 Thank you! Your feedback is much appreciated.",
-    "🌟 We’re glad you enjoyed the class!",
-    "🙌 Thanks! It’s wonderful to know you understood well.",
-    "🎉 Awesome! Keep learning with the same energy.",
-    "💡 Great! Your positive energy motivates us."
-]
-
-negative_responses = [
-    "🙏 Thank you for your feedback, we will try to improve.",
-    "💭 We understand you had difficulties, we will clarify further.",
-    "📘 Sorry it felt confusing, we’ll simplify it next time.",
-    "🤝 Thanks for being honest, we’ll take extra care on this topic.",
-    "🔍 Your feedback matters! We’ll work on making it clearer."
-]
-
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-@app.route("/feedback", methods=["POST"])
+# Route for feedback form
+@app.route("/", methods=["GET", "POST"])
 def feedback():
-    text = request.form["feedback"]
+    message = ""
+    if request.method == "POST":
+        text = request.form["feedback"]
+        if text.strip() != "":
+            # Analyze sentiment
+            result = classifier(text)[0]  # result = {'label': 'POSITIVE'/'NEGATIVE', 'score': 0.9}
+            label = result["label"]
+            
+            # Determine message
+            if label == "POSITIVE":
+                message = "Thank you! Your feedback is much appreciated."
+            else:
+                message = "Thank you! We will try to improve based on your feedback."
 
-    # Detect emotions
-    results = classifier(text)[0]
-    top_emotion = max(results, key=lambda x: x["score"])
-    label = top_emotion["label"]
-
-    # Pick a random nice message
-    if label.lower() in ["joy", "positive"]:
-        message = random.choice(positive_responses)
-    elif label.lower() in ["sadness", "fear", "anger", "negative"]:
-        message = random.choice(negative_responses)
-    else:
-        message = f"🙏 Thank you! We detected your feedback as {label}."
-
-    # Save feedback
-    with open("feedback_responses.txt", "a", encoding="utf-8") as f:
-        f.write(f"Feedback: {text} | Detected Emotion: {label}\n")
+            # Save feedback in CSV
+            csv_file = "feedback_responses.csv"
+            with open(csv_file, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([datetime.now(), text, label, message])
 
     return render_template("index.html", message=message)
 
-@app.route("/report")
-def report():
-    try:
-        with open("feedback_responses.txt", "r", encoding="utf-8") as f:
-            data = f.readlines()
-    except FileNotFoundError:
-        data = ["No feedback yet."]
-    return render_template("report.html", feedbacks=data)
-
+# Run app on Render's port
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
